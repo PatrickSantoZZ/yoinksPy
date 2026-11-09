@@ -638,17 +638,14 @@ class App:
             try:
                 ffmpeg = yt.find_ffmpeg(lambda s: self.post(abort, update(status=s)), abort)
                 self.post(abort, update(status=""))
-                base = dict(ytdlp=ytdlp, url=url, choice=choice, out_dir=OUT_DIR, ffmpeg_location=ffmpeg,
-                            abort=abort, **handlers)
-                try:
+                filepath = yt.download_with_fallbacks(
+                    ytdlp=ytdlp, url=url, choice=choice, out_dir=OUT_DIR, ffmpeg_location=ffmpeg, abort=abort,
                     # reuse the probe's metadata — starts immediately instead of re-extracting
-                    filepath = yt.download(info_json_path=info_json, **base)
-                except Exception:
-                    if abort.is_set():
-                        raise
-                    # media urls in the cached info can expire — retry with a fresh extraction
-                    self.post(abort, update(progress=None, refreshing=True))
-                    filepath = yt.download(**base)
+                    info_json_path=info_json,
+                    # media urls in the cached info expired — a fresh extraction is on its way
+                    on_refresh=lambda: self.post(abort, update(progress=None, refreshing=True)),
+                    **handlers,
+                )
 
                 def finished() -> None:
                     self.outcome = filepath

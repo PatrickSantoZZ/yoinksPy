@@ -367,6 +367,10 @@ def _clean_error(stderr: str) -> str:
     return re.sub(r"^ERROR:\s*(\[[^\]]+\]\s*)?", "", errors[-1])
 
 
+# the media links in a saved probe are short-lived; these mean "fetch fresh ones"
+EXPIRED = re.compile(r"HTTP Error (403|404|410)", re.I)
+
+
 def probe(ytdlp: str, url: str, abort: Optional[Abort] = None) -> ProbeResult:
     proc = subprocess.Popen(
         [ytdlp, "-J", "--no-playlist", "--no-warnings", "--encoding", "utf-8", url],
@@ -578,6 +582,21 @@ PROCESSING_TARGETS = (
     re.compile(r"^\[VideoRemuxer\] Remuxing video from \S+ to \S+; Destination: (.+)$"),
     re.compile(r'^\[ThumbnailsConvertor\] Converting thumbnail "(.+)" to \w+$'),
 )
+
+
+def download_with_fallbacks(*, on_refresh: Callable[[], None], abort: Optional[Abort] = None,
+                            info_json_path: Optional[str] = None, **kwargs) -> str:
+    """
+    Download from the probe's saved metadata (starts instantly). If the media
+    link expired, fetch a fresh one — any other failure is reported as is.
+    """
+    try:
+        return download(info_json_path=info_json_path, abort=abort, **kwargs)
+    except RuntimeError as error:
+        if (abort and abort.is_set()) or not EXPIRED.search(str(error)):
+            raise
+    on_refresh()
+    return download(abort=abort, **kwargs)
 
 
 def download(
