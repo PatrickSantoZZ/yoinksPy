@@ -14,6 +14,14 @@ standard library.
 ## Install
 
 ```sh
+pipx install git+https://github.com/PatrickSantoZZ/YoinksPy.git
+```
+
+To update later, run the same command with `--force`.
+
+From a local checkout:
+
+```sh
 pipx install .        # or: pip install .
 ```
 
