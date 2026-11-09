@@ -113,8 +113,11 @@ class Logo:
             return Seg(LIGHTER.get(ch, ch), theme.primary)
         return Seg(ch, theme.primary)
 
-    def block(self, theme: Theme, click: Callable[[], None]) -> Block:
+    def block(self, theme: Theme, click: Callable[[], None], mood: str = "idle") -> Block:
         t = (time.monotonic() - self.start) * 1000
+        # the kitty fades in with the letters, then sits next to them
+        kitty_dim = self.phase == "intro" and t < INTRO_MS * 0.6
+        kitty = kitty_art(mood, time.monotonic(), self.animated)
         rows = []
         for r, art_row in enumerate(ART):
             row = []
@@ -122,8 +125,35 @@ class Logo:
                 seg = self._cell(ch, r, c, t, theme)
                 seg.click = (click, 1)
                 row.append(seg)
+            row.append(Seg(" " * KITTY_GAP, click=(click, 0)))
+            kitty_seg = secondary(theme, kitty[r]) if kitty_dim else Seg(kitty[r], theme.primary)
+            kitty_seg.click = (click, 1)
+            row.append(kitty_seg)
             rows.append(row)
-        return Block(rows, COLS)
+        return Block(rows, COLS + KITTY_GAP + KITTY_WIDTH)
+
+
+# ── kitty ────────────────────────────────────────────────────────────────
+
+KITTY_GAP = 3
+KITTY_WIDTH = 7
+KITTY_EYES = {
+    "idle": "o.o",
+    "busy": "o.o",
+    "happy": "^.^",
+    "sad": ">.<",
+}
+BLINK_EVERY = 4.2  # seconds between blinks
+BLINK_FOR = 0.18
+
+
+def kitty_art(mood: str, now: float, animated: bool = True) -> List[str]:
+    eyes = KITTY_EYES.get(mood, "o.o")
+    if animated and mood in ("idle", "busy") and now % BLINK_EVERY < BLINK_FOR:
+        eyes = "-.-"
+    # busy kitty swishes its paws back and forth while something is loading
+    paws = (" > ^ < " if int(now / 0.4) % 2 else " < ^ > ") if mood == "busy" and animated else " > ^ < "
+    return [" /\\_/\\ ", f"( {eyes} )", paws]
 
 
 # ── widgets ──────────────────────────────────────────────────────────────
@@ -736,8 +766,9 @@ class App:
         content_width = max(10, min(columns - 4, 78))
         phase = self.phase
 
+        mood = {"probing": "busy", "downloading": "busy", "done": "happy", "error": "sad"}.get(phase.name, "idle")
         blocks = [
-            self.logo.block(theme, self.go_home),
+            self.logo.block(theme, self.go_home, mood),
             gap(),
             line(Seg(TAGLINE, theme.primary)),
             line(secondary(theme, SITES)),
