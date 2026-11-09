@@ -11,7 +11,8 @@ from typing import Callable, List, Optional, Tuple
 from . import ytdlp as yt
 from .fmt import format_bytes, format_duration, format_eta, format_speed, js_round, shorten_path, truncate, wrap_text
 from .clipboard import read_clipboard
-from .config import cookies as config_cookies, load_config, ytdlp_args as config_ytdlp_args
+from .config import cookies as config_cookies, load_config, save_config, ytdlp_args as config_ytdlp_args
+from .desktop import copy_file_to_clipboard
 from .history import add_to_history, load_history
 from .platforms import Platform, detect_platform, is_probably_url
 from .term import Block, Key, Mouse, Screen, Seg, Terminal, center_in, clip_row, fixed, gap, hstack, line, \
@@ -435,6 +436,7 @@ class Phase:
         self.processing = False
         self.refreshing = False
         self.filepath = ""
+        self.copied = False
         self.message = ""
         for k, v in fields.items():
             setattr(self, k, v)
@@ -445,6 +447,7 @@ class App:
                  out_dir: str = OUT_DIR, config: Optional[dict] = None) -> None:
         self.config = config if config is not None else load_config()
         self.out_dir = out_dir
+        self.copy_to_clipboard = bool(self.config.get("copy_to_clipboard"))
         # extra yt-dlp args the probe succeeded with (cookies, mweb, user args) — downloads reuse them
         self.ytdlp_args: List[str] = []
         self.events: "queue.Queue" = queue.Queue()
@@ -638,7 +641,7 @@ class App:
         self.abort = abort
         self.set_phase(Phase("downloading", choice=choice))
         url, ytdlp, info_json, out_dir = self.url, self.ytdlp, self.info_json, self.out_dir
-        extra_args = list(self.ytdlp_args)
+        extra_args, copy_file = list(self.ytdlp_args), self.copy_to_clipboard
         is_youtube = detect_platform(url).key == "youtube"
 
         def update(**fields) -> Callable[[], None]:
@@ -666,11 +669,12 @@ class App:
                     on_refresh=lambda: self.post(abort, update(progress=None, refreshing=True)),
                     **handlers,
                 )
+                copied = copy_file and copy_file_to_clipboard(filepath)
 
                 def finished() -> None:
                     self.outcome = filepath
                     self.history = add_to_history(url)
-                    self.set_phase(Phase("done", filepath=filepath))
+                    self.set_phase(Phase("done", filepath=filepath, copied=copied))
 
                 self.post(abort, finished)
             except Exception as error:  # noqa: BLE001
@@ -688,6 +692,9 @@ class App:
             return
         if key.ctrl and key.input == "t":
             self.cycle_theme()
+            return
+        if key.ctrl and key.input == "d":
+            self.toggle_copy()
             return
         name = self.phase.name
         if name == "input" and key.ctrl and key.input == "v":
@@ -714,6 +721,10 @@ class App:
             )
         elif name == "picking" and not key.ctrl and not key.meta:
             self._select_key(key)
+
+    def toggle_copy(self) -> None:
+        self.copy_to_clipboard = not self.copy_to_clipboard
+        self.config = save_config(copy_to_clipboard=self.copy_to_clipboard)
 
     def _text_input(self) -> TextInput:
         if self.text_input is None:
@@ -750,6 +761,8 @@ class App:
             return self.exit
         if key == "^t":
             return self.cycle_theme
+        if key == "^d":
+            return self.toggle_copy
         if key == "esc":
             return self.cancel_run if name in ("probing", "downloading") else self.reset_to_input
         if key == "↵":
@@ -838,6 +851,7 @@ class App:
             blocks.append(vstack([
                 line(Seg("✓ yoinked! ", theme.primary, bold=True), Seg("find your file in:", theme.primary)),
                 line(secondary(theme, shorten_path(phase.filepath, str(Path.home()), 60))),
+                *([line(secondary(theme, "⧉ copied to clipboard — paste it anywhere"))] if phase.copied else []),
                 gap(),
                 button,
             ]))
@@ -904,6 +918,8 @@ class App:
         hints = [*HINTS[self.phase.name], ("^t", f"theme:{theme.mode}")]
         if self.phase.name == "input" and self.history:
             hints = [hints[0], ("↑", "history"), *hints[1:]]
+        if self.phase.name == "input":
+            hints.append(("^d", f"copy file:{'on' if self.copy_to_clipboard else 'off'}"))
         row: List[Seg] = []
         if self.phase.name == "probing":
             row += [Seg(spinner_frame(), theme.primary), secondary(theme, f" {self.phase.status}"),

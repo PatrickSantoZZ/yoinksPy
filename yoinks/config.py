@@ -3,6 +3,7 @@ Persistent settings in ~/.config/yoinks/config.json:
 
     {
       "cookies": "firefox",          // browser to borrow login cookies from, or null
+      "copy_to_clipboard": false,    // put the finished file on the clipboard
       "output_dir": null,            // default download folder (null = ~/Downloads)
       "ytdlp_args": []               // extra yt-dlp arguments, e.g. ["--embed-chapters"]
     }
@@ -20,6 +21,7 @@ COOKIE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "opera", "s
 
 DEFAULTS: Dict[str, Any] = {
     "cookies": None,
+    "copy_to_clipboard": False,
     "output_dir": None,
     "ytdlp_args": [],
 }
@@ -37,6 +39,8 @@ def _clean(raw: Any) -> Dict[str, Any]:
     cookies = raw.get("cookies")
     if isinstance(cookies, str) and is_cookie_browser(cookies):
         config["cookies"] = cookies
+    if isinstance(raw.get("copy_to_clipboard"), bool):
+        config["copy_to_clipboard"] = raw["copy_to_clipboard"]
     if isinstance(raw.get("output_dir"), str) and raw["output_dir"].strip():
         config["output_dir"] = raw["output_dir"]
     args = raw.get("ytdlp_args")
