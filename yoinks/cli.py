@@ -47,7 +47,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(HELP)
         return 0
     if args.version:
-        print(__version__)
+        from .ytdlp import find_ytdlp
+
+        print(f"yoinks {__version__}")
+        found = find_ytdlp()
+        if found:
+            print(f"yt-dlp {found.version} ({found.source}: {found.path})")
+        else:
+            print("yt-dlp not installed — fetched on first yoink")
         return 0
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):

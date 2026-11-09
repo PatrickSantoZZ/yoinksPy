@@ -170,8 +170,10 @@ class Screen:
         self._last_size = (0, 0)
         self.spans: List[Tuple[int, int, int, Click]] = []
 
-    def draw(self, block: Block, cols: int, rows: int, background: Optional[str]) -> None:
-        # ink lays the app out one row short of the screen height
+    def draw(self, block: Block, cols: int, rows: int, background: Optional[str],
+             footer: Optional[Row] = None) -> None:
+        # ink lays the app out one row short of the screen height; the spare
+        # last row holds the optional centered footer
         height = max(1, rows - 1)
         top = max(0, (height - block.height + 1) // 2)
         left = max(0, (cols - block.width + 1) // 2)
@@ -179,8 +181,13 @@ class Screen:
         out_rows = []
         for y in range(rows):
             index = y - top
-            content = block.rows[index] if 0 <= index < block.height and y < height else []
-            out_rows.append(self._render_row(_pad(left) + content if content else [], cols, background, y, spans))
+            if footer and y == rows - 1 and rows > 1:
+                content = _pad((cols - row_width(footer) + 1) // 2) + footer
+            elif 0 <= index < block.height and y < height:
+                content = _pad(left) + block.rows[index]
+            else:
+                content = []
+            out_rows.append(self._render_row(content, cols, background, y, spans))
         frame = "\x1b[H" + "\r\n".join(out_rows)
         size = (cols, rows)
         if size != self._last_size:

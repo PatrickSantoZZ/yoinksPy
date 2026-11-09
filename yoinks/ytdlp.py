@@ -149,16 +149,58 @@ def _fetch(url: str, dest: Path, abort: Optional[Abort], what: str,
         raise
 
 
+def _command_output(cmd: str, args: List[str]) -> Optional[str]:
+    """stdout of a command that exited 0, else None."""
+    try:
+        result = subprocess.run(
+            [cmd, *args],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8", "replace").strip()
+
+
+def managed_ytdlp_path() -> Path:
+    """Where yoinks keeps its own copy of yt-dlp."""
+    return YOINKS_DIR / ("yt-dlp.exe" if IS_WINDOWS else "yt-dlp")
+
+
+@dataclass
+class YtDlpInfo:
+    path: str
+    version: str
+    # 'system' = found on PATH, 'yoinks' = our copy in ~/.yoinks/bin
+    source: str
+
+
+def find_ytdlp() -> Optional[YtDlpInfo]:
+    """The yt-dlp yoinks would use — system install first, then its own copy. Never downloads."""
+    system = shutil.which("yt-dlp")
+    if system:
+        version = _command_output(system, ["--version"])
+        if version is not None:
+            return YtDlpInfo(system, version, "system")
+    local = managed_ytdlp_path()
+    if local.exists():
+        version = _command_output(str(local), ["--version"])
+        if version is not None:
+            return YtDlpInfo(str(local), version, "yoinks")
+    return None
+
+
 def ensure_ytdlp(on_status: Callable[[str], None], abort: Optional[Abort] = None) -> str:
     """System yt-dlp first, then a previously downloaded copy, then fetch the standalone binary."""
-    system = shutil.which("yt-dlp")
-    if system and _command_works(system, ["--version"]):
-        return system
+    found = find_ytdlp()
+    if found:
+        return found.path
 
-    local = YOINKS_DIR / ("yt-dlp.exe" if IS_WINDOWS else "yt-dlp")
-    if local.exists() and _command_works(str(local), ["--version"]):
-        return str(local)
-
+    local = managed_ytdlp_path()
     on_status("first run: fetching yt-dlp…")
     YOINKS_DIR.mkdir(parents=True, exist_ok=True)
     tmp = local.with_name(local.name + ".download")

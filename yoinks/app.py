@@ -432,6 +432,9 @@ class App:
         self.running = True
         self.phase = Phase("probing", status="warming up…") if initial_url else Phase("input")
         self._initial_url = initial_url
+        # which yt-dlp is in use, for the version footer: None while checking
+        self.ytdlp_info: Optional[yt.YtDlpInfo] = None
+        self.ytdlp_checked = False
 
     @property
     def theme(self) -> Theme:
@@ -442,6 +445,7 @@ class App:
     def run(self) -> None:
         self.term.start()
         try:
+            self._check_ytdlp()
             if self._initial_url:
                 self.start_probe(self._initial_url)
             while self.running:
@@ -491,6 +495,19 @@ class App:
     def exit(self) -> None:
         self.running = False
 
+    def _check_ytdlp(self) -> None:
+        """Find out (in the background) which yt-dlp will run, for the version footer."""
+        def work() -> None:
+            info = yt.find_ytdlp()
+
+            def apply() -> None:
+                self.ytdlp_info = info
+                self.ytdlp_checked = True
+
+            self.events.put(("call", apply))
+
+        threading.Thread(target=work, daemon=True).start()
+
     # state ----------------------------------------------------------------
 
     def set_phase(self, phase: Phase) -> None:
@@ -536,6 +553,8 @@ class App:
             try:
                 ytdlp = self.ytdlp or yt.ensure_ytdlp(lambda s: self.post(abort, lambda: set_status(s)), abort)
                 self.post(abort, lambda: setattr(self, "ytdlp", ytdlp))
+                if not self.ytdlp_info or self.ytdlp_info.path != ytdlp:
+                    self._check_ytdlp()  # it was just fetched — refresh the footer
                 if abort.is_set():
                     return
                 self.post(abort, lambda: set_status("fetching video info…"))
@@ -697,7 +716,19 @@ class App:
     def draw(self) -> None:
         cols, rows = self.term.size()
         self.logo.tick(time.monotonic())
-        self.screen.draw(self.view(cols), cols, rows, self.theme.background)
+        self.screen.draw(self.view(cols), cols, rows, self.theme.background, self.version_footer())
+
+    def version_footer(self) -> List[Seg]:
+        from . import __version__
+
+        if self.ytdlp_info:
+            where = "system" if self.ytdlp_info.source == "system" else "~/.yoinks/bin"
+            ytdlp = f"yt-dlp {self.ytdlp_info.version} ({where})"
+        elif self.ytdlp_checked:
+            ytdlp = "yt-dlp not installed — fetched on first yoink"
+        else:
+            ytdlp = "yt-dlp …"
+        return [secondary(self.theme, f"yoinks {__version__}  ·  {ytdlp}")]
 
     def view(self, columns: int) -> Block:
         theme = self.theme
