@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yoinks"
+dynamic = ["version"]
+description = "yoink any video from YouTube, X, Instagram, Threads & 1800+ sites — right from your terminal. paste. yoink. done."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = []
+keywords = ["video", "downloader", "yt-dlp", "youtube", "instagram", "twitter", "threads", "cli", "tui"]
+
+[project.scripts]
+yoinks = "yoinks.cli:main"
+
+[tool.setuptools]
+packages = ["yoinks"]
+
+[tool.setuptools.dynamic]
+version = { attr = "yoinks.__version__" }
