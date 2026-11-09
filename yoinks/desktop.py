@@ -1,4 +1,4 @@
-"""Hand a finished download to the desktop: put the file itself on the clipboard."""
+"""Hand a finished download to the desktop: put the file on the clipboard, or show its folder."""
 from __future__ import annotations
 
 import os
@@ -99,3 +99,18 @@ def copy_file_to_clipboard(filepath: str) -> bool:
         pass
     return False
 
+
+def reveal_in_file_manager(filepath: str) -> bool:
+    """Open the download's folder (Finder highlights the file itself)."""
+    folder = os.path.dirname(os.path.abspath(filepath))
+    try:
+        if sys.platform == "win32":
+            os.startfile(folder)  # explorer's /select is unreliable without an open window
+            return True
+        command = ["open", "-R", filepath] if sys.platform == "darwin" else ["xdg-open", folder]
+        # detached: the file manager outlives yoinks and must not draw on our screen
+        subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return True
+    except OSError:
+        return False

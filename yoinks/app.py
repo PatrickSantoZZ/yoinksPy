@@ -12,7 +12,7 @@ from . import ytdlp as yt
 from .fmt import format_bytes, format_duration, format_eta, format_speed, js_round, shorten_path, truncate, wrap_text
 from .clipboard import read_clipboard
 from .config import cookies as config_cookies, load_config, save_config, ytdlp_args as config_ytdlp_args
-from .desktop import copy_file_to_clipboard
+from .desktop import copy_file_to_clipboard, reveal_in_file_manager
 from .history import add_to_history, load_history
 from .platforms import Platform, detect_platform, is_probably_url
 from .term import Block, Key, Mouse, Screen, Seg, Terminal, center_in, clip_row, fixed, gap, hstack, line, \
@@ -32,7 +32,7 @@ HINTS = {
     "probing": [("esc", "cancel"), ("^c", "quit")],
     "picking": [("↑↓", "choose"), ("↵", "yoink"), ("esc", "back"), ("^c", "quit")],
     "downloading": [("esc", "cancel"), ("^c", "quit")],
-    "done": [("^c", "quit")],
+    "done": [("o", "open folder"), ("^c", "quit")],
     "error": [("↵", "try again"), ("^c", "quit")],
 }
 
@@ -697,6 +697,9 @@ class App:
             self.toggle_copy()
             return
         name = self.phase.name
+        if name == "done" and key.input == "o" and not key.ctrl and not key.meta:
+            self.open_folder()
+            return
         if name == "input" and key.ctrl and key.input == "v":
             # ctrl+v pastes the system clipboard in terminals that don't do it themselves
             key = Key(input=read_clipboard(), paste=True)
@@ -725,6 +728,10 @@ class App:
     def toggle_copy(self) -> None:
         self.copy_to_clipboard = not self.copy_to_clipboard
         self.config = save_config(copy_to_clipboard=self.copy_to_clipboard)
+
+    def open_folder(self) -> None:
+        if self.phase.name == "done" and self.phase.filepath:
+            reveal_in_file_manager(self.phase.filepath)
 
     def _text_input(self) -> TextInput:
         if self.text_input is None:
@@ -763,6 +770,8 @@ class App:
             return self.cycle_theme
         if key == "^d":
             return self.toggle_copy
+        if key == "o":
+            return self.open_folder
         if key == "esc":
             return self.cancel_run if name in ("probing", "downloading") else self.reset_to_input
         if key == "↵":
