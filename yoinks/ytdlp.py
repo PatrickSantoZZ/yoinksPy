@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -149,6 +150,35 @@ def _fetch(url: str, dest: Path, abort: Optional[Abort], what: str,
         raise
 
 
+def _fetch_text(url: str, what: str) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError):
+        raise RuntimeError(f"Could not download {what}. Check your connection and try again.")
+
+
+def _verify_sha256(path: Path, sums_url: str, asset: str, what: str) -> None:
+    """Compare a downloaded file against the release's published checksum list."""
+    expected = None
+    for row in _fetch_text(sums_url, f"{what} checksums").splitlines():
+        parts = row.strip().split()
+        if len(parts) >= 2 and parts[-1].lstrip("*") == asset:
+            expected = parts[0].lower()
+            break
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if not expected or digest.hexdigest() != expected:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise RuntimeError(f"Downloaded {what} failed its checksum. Try again later.")
+
+
 def _command_output(cmd: str, args: List[str]) -> Optional[str]:
     """stdout of a command that exited 0, else None."""
     try:
@@ -204,9 +234,17 @@ def ensure_ytdlp(on_status: Callable[[str], None], abort: Optional[Abort] = None
     on_status("first run: fetching yt-dlp…")
     YOINKS_DIR.mkdir(parents=True, exist_ok=True)
     tmp = local.with_name(local.name + ".download")
-    _fetch(f"{RELEASE_BASE}/{_ytdlp_asset_name()}", tmp, abort, "yt-dlp")
-    os.chmod(tmp, 0o755)
-    os.replace(tmp, local)
+    asset = _ytdlp_asset_name()
+    try:
+        _fetch(f"{RELEASE_BASE}/{asset}", tmp, abort, "yt-dlp")
+        _verify_sha256(tmp, f"{RELEASE_BASE}/SHA2-256SUMS", asset, "yt-dlp")
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, local)
+    finally:
+        try:
+            tmp.unlink()  # never leave a half-written .download behind
+        except OSError:
+            pass
     return str(local)
 
 
@@ -284,6 +322,7 @@ def find_ffmpeg(on_status: Callable[[str], None], abort: Optional[Abort] = None)
 
     try:
         _fetch(f"{FFMPEG_BASE}/{asset}", download_path, abort, "ffmpeg", progress)
+        _verify_sha256(download_path, f"{FFMPEG_BASE}/checksums.sha256", asset, "ffmpeg")
         os.replace(download_path, archive)
         on_status("first run: unpacking ffmpeg…")
         _extract_ffmpeg(archive, [f"ffmpeg{exe}", f"ffprobe{exe}"])
