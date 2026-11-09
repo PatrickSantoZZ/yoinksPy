@@ -438,7 +438,9 @@ def build_choices(info: dict) -> List[DownloadChoice]:
     choices.append(DownloadChoice(
         kind="audio",
         label=f"audio only · mp3{audio_size_label}",
-        args=["-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
+        # cover art + title/artist tags, so the mp3 looks right in any player
+        args=["-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+              "--embed-thumbnail", "--embed-metadata"],
     ))
     return choices
 
@@ -469,6 +471,15 @@ def _to_number(value: Optional[str]) -> Optional[float]:
 
 
 CONCURRENT_FRAGMENTS = 4
+
+# post-processing steps — the UI shows "processing…" while these run
+PROCESSING_TAGS = ("[Merger]", "[ExtractAudio]", "[ThumbnailsConvertor]", "[EmbedThumbnail]", "[Metadata]")
+# files those steps create, so a cancel can remove them
+PROCESSING_TARGETS = (
+    re.compile(r'^\[Merger\] Merging formats into "(.+)"$'),
+    re.compile(r"^\[ExtractAudio\] Destination: (.+)$"),
+    re.compile(r'^\[ThumbnailsConvertor\] Converting thumbnail "(.+)" to \w+$'),
+)
 
 
 def download(
@@ -555,13 +566,19 @@ def download(
             elif "Downloading 1 format(s):" in line:
                 # "[info] xxx: Downloading 1 format(s): 395+251" — each id is one file
                 total_parts = len(line.split("format(s):", 1)[1].strip().split("+"))
-            elif "[Merger]" in line or "[ExtractAudio]" in line:
-                merging = re.match(r'^\[Merger\] Merging formats into "(.+)"$', line)
-                extracting = re.match(r"^\[ExtractAudio\] Destination: (.+)$", line)
-                target = (merging or extracting)
-                if target:
-                    destinations.append(target.group(1))
+            elif any(tag in line for tag in PROCESSING_TAGS):
+                for pattern in PROCESSING_TARGETS:
+                    target = pattern.match(line)
+                    if target:
+                        destinations.append(target.group(1))
+                converting = re.match(r'^\[ThumbnailsConvertor\] Converting thumbnail "(.+)" to (\w+)$', line)
+                if converting:
+                    destinations.append(f"{os.path.splitext(converting.group(1))[0]}.{converting.group(2)}")
                 on_processing()
+            elif "Writing video thumbnail" in line:
+                thumb = re.search(r"Writing video thumbnail .+ to: (.+)$", line)
+                if thumb:
+                    destinations.append(thumb.group(1))
             elif line.startswith("[download] Destination: "):
                 destinations.append(line[len("[download] Destination: "):])
             elif os.path.isabs(line):

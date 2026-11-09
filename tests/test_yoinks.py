@@ -105,6 +105,11 @@ class ChoicesTest(unittest.TestCase):
         choices = build_choices({"formats": [{"ext": "jpg", "filesize": 2048}, {"ext": "jpg", "filesize": 4096}]})
         self.assertEqual([c.label for c in choices], ["image · jpg · ~4.0 KB"])
 
+    def test_mp3_gets_cover_and_tags(self):
+        audio = build_choices({})[-1]
+        self.assertIn("--embed-thumbnail", audio.args)
+        self.assertIn("--embed-metadata", audio.args)
+
     def test_no_formats(self):
         self.assertEqual([c.label for c in build_choices({})], ["best available · mp4", "audio only · mp3"])
 
