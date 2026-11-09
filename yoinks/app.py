@@ -11,6 +11,7 @@ from typing import Callable, List, Optional, Tuple
 from . import ytdlp as yt
 from .fmt import format_bytes, format_duration, format_eta, format_speed, js_round, shorten_path, truncate, wrap_text
 from .clipboard import read_clipboard
+from .config import load_config, ytdlp_args as config_ytdlp_args
 from .history import add_to_history, load_history
 from .platforms import Platform, detect_platform, is_probably_url
 from .term import Block, Key, Mouse, Screen, Seg, Terminal, center_in, clip_row, fixed, gap, hstack, line, \
@@ -440,7 +441,9 @@ class Phase:
 
 
 class App:
-    def __init__(self, *, initial_url: Optional[str], clipboard_url: Optional[str], theme_mode: str) -> None:
+    def __init__(self, *, initial_url: Optional[str], clipboard_url: Optional[str], theme_mode: str,
+                 config: Optional[dict] = None) -> None:
+        self.config = config if config is not None else load_config()
         # extra yt-dlp args the probe succeeded with (cookies, mweb, user args) — downloads reuse them
         self.ytdlp_args: List[str] = []
         self.events: "queue.Queue" = queue.Queue()
@@ -593,6 +596,7 @@ class App:
                 self.post(abort, lambda: set_status("fetching video info…"))
                 result, used_args = yt.probe_with_fallbacks(
                     ytdlp, target_url, abort,
+                    extra_args=config_ytdlp_args(self.config),
                     is_youtube=detect_platform(target_url).key == "youtube",
                 )
                 self.info_jsons.append(result.info_json_path)
