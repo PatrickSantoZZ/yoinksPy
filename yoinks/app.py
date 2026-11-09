@@ -10,6 +10,7 @@ from typing import Callable, List, Optional, Tuple
 
 from . import ytdlp as yt
 from .fmt import format_bytes, format_duration, format_eta, format_speed, js_round, shorten_path, truncate, wrap_text
+from .clipboard import read_clipboard
 from .history import add_to_history, load_history
 from .platforms import Platform, detect_platform, is_probably_url
 from .term import Block, Key, Mouse, Screen, Seg, Terminal, center_in, clip_row, fixed, gap, hstack, line, \
@@ -673,6 +674,9 @@ class App:
             self.cycle_theme()
             return
         name = self.phase.name
+        if name == "input" and key.ctrl and key.input == "v":
+            # ctrl+v pastes the system clipboard in terminals that don't do it themselves
+            key = Key(input=read_clipboard(), paste=True)
         if key.escape and name in ("picking", "error", "done"):
             self.reset_to_input()
             return
