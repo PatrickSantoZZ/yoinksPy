@@ -383,6 +383,14 @@ def _score_video(fmt: dict) -> float:
     return score
 
 
+def _size(fmt: dict, duration: Optional[float]) -> Optional[float]:
+    """Known file size, else an estimate from bitrate × duration (HLS streams have no size)."""
+    size = _first(fmt.get("filesize"), fmt.get("filesize_approx"))
+    if size is None and _num(fmt.get("tbr")) and _num(duration):
+        size = fmt["tbr"] * duration * 125  # kbit/s → bytes
+    return size
+
+
 def _height_label(height: float) -> str:
     return str(int(height)) if float(height).is_integer() else str(height)
 
@@ -404,6 +412,7 @@ def _image_choice(info: dict, formats: List[dict]) -> Optional[DownloadChoice]:
 
 def build_choices(info: dict) -> List[DownloadChoice]:
     formats = [f for f in (info.get("formats") or []) if isinstance(f, dict)]
+    duration = _num(info.get("duration"))
     image = _image_choice(info, formats)
     if image:
         return [image]
@@ -413,7 +422,7 @@ def build_choices(info: dict) -> List[DownloadChoice]:
     best_audio = (
         sorted(audio_only, key=lambda f: -(_first(f.get("abr"), f.get("tbr")) or 0))[0] if audio_only else None
     )
-    audio_size = _first(best_audio.get("filesize"), best_audio.get("filesize_approx")) if best_audio else None
+    audio_size = _size(best_audio, duration) if best_audio else None
 
     videos = [f for f in formats if _has_codec(f.get("vcodec")) and _num(f.get("height"))]
     heights = sorted({f["height"] for f in videos}, reverse=True)
@@ -422,7 +431,7 @@ def build_choices(info: dict) -> List[DownloadChoice]:
         candidates = [f for f in videos if f["height"] == height]
         best = sorted(candidates, key=lambda f: -_score_video(f))[0]
         muxed = _has_codec(best.get("acodec"))
-        size = (_first(best.get("filesize"), best.get("filesize_approx")) or 0) + (0 if muxed else (audio_size or 0))
+        size = (_size(best, duration) or 0) + (0 if muxed else (audio_size or 0))
         size_label = f" · ~{format_bytes(size)}" if size > 0 else ""
         h = _height_label(height)
         choices.append(DownloadChoice(
@@ -436,7 +445,7 @@ def build_choices(info: dict) -> List[DownloadChoice]:
             kind="video", label="best available · mp4", args=["-f", "bv*+ba/b", "--merge-output-format", "mp4"],
         ))
     else:
-        compatible = _compatible_choice(videos, audio_only)
+        compatible = _compatible_choice(videos, audio_only, duration)
         if compatible:
             choices.append(compatible)
 
@@ -460,7 +469,7 @@ _AAC_FILTER = f"[acodec~='{AAC_CODEC}']"
 COMPATIBLE_FORMAT = f"bv{_H264_FILTER}+ba{_AAC_FILTER}/b{_H264_FILTER}{_AAC_FILTER}"
 
 
-def _compatible_choice(videos: List[dict], audio_only: List[dict]) -> Optional[DownloadChoice]:
+def _compatible_choice(videos: List[dict], audio_only: List[dict], duration: Optional[float]) -> Optional[DownloadChoice]:
     is_h264 = lambda f: re.match(H264_CODEC, str(f.get("vcodec") or "")) is not None  # noqa: E731
     is_aac = lambda f: re.match(AAC_CODEC, str(f.get("acodec") or "")) is not None  # noqa: E731
     aac_audio = sorted((f for f in audio_only if is_aac(f)), key=lambda f: -(_first(f.get("abr"), f.get("tbr")) or 0))
@@ -468,9 +477,9 @@ def _compatible_choice(videos: List[dict], audio_only: List[dict]) -> Optional[D
     if not candidates:
         return None
     best = sorted(candidates, key=lambda f: (-f["height"], -_score_video(f)))[0]
-    size = _first(best.get("filesize"), best.get("filesize_approx")) or 0
+    size = _size(best, duration) or 0
     if not is_aac(best) and aac_audio:
-        size += _first(aac_audio[0].get("filesize"), aac_audio[0].get("filesize_approx")) or 0
+        size += _size(aac_audio[0], duration) or 0
     size_label = f" · ~{format_bytes(size)}" if size > 0 else ""
     return DownloadChoice(
         kind="video",
