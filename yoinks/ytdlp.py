@@ -370,24 +370,39 @@ def _clean_error(stderr: str) -> str:
 FORBIDDEN = re.compile(r"HTTP Error 403", re.I)
 # the media links in a saved probe are short-lived; these mean "fetch fresh ones"
 EXPIRED = re.compile(r"HTTP Error (403|404|410)", re.I)
+COOKIE_TROUBLE = re.compile(r"cookie|DPAPI|keyring", re.I)
 # YouTube's default clients increasingly hand out links that 403 without a PO
 # token; the mweb client sidesteps that for most public videos
 MWEB_ARGS = ["--extractor-args", "youtube:player-client=mweb"]
 
 
-def probe_with_fallbacks(ytdlp: str, url: str, abort: Optional[Abort], *,
+def cookie_args(browser: Optional[str]) -> List[str]:
+    """Borrow a browser's login so private, age-gated and login-walled posts (Instagram!) work."""
+    return ["--cookies-from-browser", browser] if browser else []
+
+
+def probe_with_fallbacks(ytdlp: str, url: str, abort: Optional[Abort], *, cookies: Optional[str] = None,
                          extra_args: Optional[List[str]] = None, is_youtube: bool = False) -> tuple:
     """
-    Probe, retrying YouTube 403s with the mweb client.
+    Probe, quietly recovering from two known failures: unreadable browser
+    cookies (carry on signed out) and YouTube 403s (retry with the mweb client).
     Returns (ProbeResult, the extra yt-dlp args that worked — reuse them to download).
     """
-    args = list(extra_args or [])
+    args = [*(extra_args or []), *cookie_args(cookies)]
     try:
         return probe(ytdlp, url, abort, args), args
     except RuntimeError as error:
         if abort and abort.is_set():
             raise
         last = error
+    if cookies and COOKIE_TROUBLE.search(str(last)):
+        args = list(extra_args or [])
+        try:
+            return probe(ytdlp, url, abort, args), args
+        except RuntimeError as error:
+            if abort and abort.is_set():
+                raise
+            last = error
     if is_youtube and FORBIDDEN.search(str(last)):
         args = [*args, *MWEB_ARGS]
         return probe(ytdlp, url, abort, args), args

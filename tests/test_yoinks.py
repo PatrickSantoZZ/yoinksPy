@@ -1,7 +1,12 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
+from yoinks import config as config_mod
 from yoinks import ytdlp as yt
+
 from yoinks.args import parse_args
 from yoinks.fmt import format_bytes, format_duration, shorten_path, truncate, wrap_text
 from yoinks.platforms import detect_platform, is_probably_url
@@ -24,6 +29,14 @@ class ArgsTest(unittest.TestCase):
         self.assertRegex(parse_args(["--theme", "sepia"]).error, "unknown theme")
         self.assertRegex(parse_args(["--wat"]).error, "unknown option")
         self.assertRegex(parse_args(["one", "two"]).error, "single url")
+
+    def test_output_and_cookies(self):
+        args = parse_args(["-o", "~/Videos", "--cookies", "firefox", "https://x.com/a"])
+        self.assertEqual((args.output_dir, args.cookies, args.initial_url), ("~/Videos", "firefox", "https://x.com/a"))
+        self.assertEqual(parse_args(["--output=D:/v", "--cookies=none"]).cookies, "none")
+        self.assertEqual(parse_args(["--cookies", "firefox:work"]).cookies, "firefox:work")
+        self.assertRegex(parse_args(["-o"]).error, "needs a folder")
+        self.assertRegex(parse_args(["--cookies", "netscape"]).error, "can’t read cookies")
 
 
 class ThemeTest(unittest.TestCase):
@@ -130,6 +143,22 @@ class ChoicesTest(unittest.TestCase):
 
     def test_no_formats(self):
         self.assertEqual([c.label for c in build_choices({})], ["best available · mp4", "audio only · mp3"])
+
+
+class ConfigTest(unittest.TestCase):
+    def test_roundtrip_keeps_unknown_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps({"mine": 1, "ytdlp_args": ["--embed-chapters"]}), encoding="utf-8")
+            with mock.patch.object(config_mod, "CONFIG_FILE", path):
+                cfg = config_mod.save_config(cookies="firefox")
+                self.assertEqual(cfg["cookies"], "firefox")
+                self.assertEqual(config_mod.load_config()["ytdlp_args"], ["--embed-chapters"])
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["mine"], 1)
+
+    def test_bad_values_fall_back(self):
+        cfg = config_mod._clean({"cookies": "netscape", "ytdlp_args": "--x", "copy_to_clipboard": "yes"})
+        self.assertEqual(cfg, config_mod.DEFAULTS)
 
 
 class FallbackTest(unittest.TestCase):

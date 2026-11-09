@@ -8,7 +8,7 @@ from typing import List, Optional
 from . import __version__
 from .args import parse_args
 from .clipboard import read_clipboard
-from .config import load_config
+from .config import load_config, save_config
 from .platforms import is_probably_url
 
 HELP = """
@@ -22,9 +22,12 @@ HELP = """
     $ yoinks https://x.com/user/status/123456
     $ yoinks                 (prompts for a url)
     $ yoinks -o ~/Videos https://youtu.be/dQw4w9WgXcQ
+    $ yoinks --cookies firefox   (sign in as you — private / Instagram posts)
 
   Options
     -o, --output <dir>  save downloads to <dir> (default: ~/Downloads)
+    --cookies <browser> borrow a browser's login: firefox, chrome, edge, brave, …
+                        or none to switch it off again (remembered)
     --theme <mode>      use auto, light, or dark for this run
     -h, --help          show this help
     -v, --version       show version
@@ -71,6 +74,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     config = load_config()
+    if args.cookies:
+        config = save_config(cookies=None if args.cookies == "none" else args.cookies)
 
     out_dir = resolve_output_dir(args.output_dir or config.get("output_dir"))
     try:

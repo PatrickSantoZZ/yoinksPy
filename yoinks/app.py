@@ -11,7 +11,7 @@ from typing import Callable, List, Optional, Tuple
 from . import ytdlp as yt
 from .fmt import format_bytes, format_duration, format_eta, format_speed, js_round, shorten_path, truncate, wrap_text
 from .clipboard import read_clipboard
-from .config import load_config, ytdlp_args as config_ytdlp_args
+from .config import cookies as config_cookies, load_config, ytdlp_args as config_ytdlp_args
 from .history import add_to_history, load_history
 from .platforms import Platform, detect_platform, is_probably_url
 from .term import Block, Key, Mouse, Screen, Seg, Terminal, center_in, clip_row, fixed, gap, hstack, line, \
@@ -597,6 +597,7 @@ class App:
                 self.post(abort, lambda: set_status("fetching video info…"))
                 result, used_args = yt.probe_with_fallbacks(
                     ytdlp, target_url, abort,
+                    cookies=config_cookies(self.config),
                     extra_args=config_ytdlp_args(self.config),
                     is_youtube=detect_platform(target_url).key == "youtube",
                 )
@@ -777,7 +778,11 @@ class App:
             ytdlp = "yt-dlp not installed — fetched on first yoink"
         else:
             ytdlp = "yt-dlp …"
-        return [secondary(self.theme, f"yoinks {__version__}  ·  {ytdlp}")]
+        parts = [f"yoinks {__version__}", ytdlp]
+        browser = config_cookies(self.config)
+        if browser:
+            parts.append(f"cookies: {browser}")
+        return [secondary(self.theme, "  ·  ".join(parts))]
 
     def view(self, columns: int) -> Block:
         theme = self.theme
