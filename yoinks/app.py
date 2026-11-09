@@ -607,6 +607,8 @@ class App:
         threading.Thread(target=work, daemon=True).start()
 
     def handle_url_submit(self, value: str) -> None:
+        if self.phase.name != "input":
+            return  # a stale click or a double enter mustn't start a second run
         trimmed = value.strip()
         if not is_probably_url(trimmed):
             self.set_phase(Phase("input", warning="that doesn’t look like a link — paste a full url"))
@@ -615,7 +617,8 @@ class App:
         self.start_probe(trimmed)
 
     def handle_pick(self, index: int) -> None:
-        if not 0 <= index < len(self.choices):
+        # only from the picker — a double click or enter mustn't start two downloads
+        if self.phase.name != "picking" or not 0 <= index < len(self.choices):
             return
         choice = self.choices[index]
         abort = yt.Abort()
