@@ -349,8 +349,10 @@ def probe(ytdlp: str, url: str, abort: Optional[Abort] = None) -> ProbeResult:
 @dataclass
 class DownloadChoice:
     label: str
-    kind: str  # 'video' | 'audio'
+    kind: str  # 'video' | 'audio' | 'image'
     args: List[str] = field(default_factory=list)
+    # added to the file name so it doesn't collide with another variant of the same video
+    suffix: str = ""
 
 
 MAX_VIDEO_CHOICES = 8
@@ -433,6 +435,10 @@ def build_choices(info: dict) -> List[DownloadChoice]:
         choices.append(DownloadChoice(
             kind="video", label="best available · mp4", args=["-f", "bv*+ba/b", "--merge-output-format", "mp4"],
         ))
+    else:
+        compatible = _compatible_choice(videos, audio_only)
+        if compatible:
+            choices.append(compatible)
 
     audio_size_label = f" · ~{format_bytes(audio_size)}" if audio_size else ""
     choices.append(DownloadChoice(
@@ -443,6 +449,35 @@ def build_choices(info: dict) -> List[DownloadChoice]:
               "--embed-thumbnail", "--embed-metadata"],
     ))
     return choices
+
+
+# H.264 video + AAC audio plays everywhere — QuickTime, WhatsApp, old editors,
+# Windows without the AV1 extension. The same rules pick the streams in yt-dlp.
+H264_CODEC = r"^(avc[13]|h264)(\.|$)"
+AAC_CODEC = r"^(mp4a\.40\.|aac$)"
+_H264_FILTER = f"[vcodec~='{H264_CODEC}']"
+_AAC_FILTER = f"[acodec~='{AAC_CODEC}']"
+COMPATIBLE_FORMAT = f"bv{_H264_FILTER}+ba{_AAC_FILTER}/b{_H264_FILTER}{_AAC_FILTER}"
+
+
+def _compatible_choice(videos: List[dict], audio_only: List[dict]) -> Optional[DownloadChoice]:
+    is_h264 = lambda f: re.match(H264_CODEC, str(f.get("vcodec") or "")) is not None  # noqa: E731
+    is_aac = lambda f: re.match(AAC_CODEC, str(f.get("acodec") or "")) is not None  # noqa: E731
+    aac_audio = sorted((f for f in audio_only if is_aac(f)), key=lambda f: -(_first(f.get("abr"), f.get("tbr")) or 0))
+    candidates = [f for f in videos if is_h264(f) and (is_aac(f) or (not _has_codec(f.get("acodec")) and aac_audio))]
+    if not candidates:
+        return None
+    best = sorted(candidates, key=lambda f: (-f["height"], -_score_video(f)))[0]
+    size = _first(best.get("filesize"), best.get("filesize_approx")) or 0
+    if not is_aac(best) and aac_audio:
+        size += _first(aac_audio[0].get("filesize"), aac_audio[0].get("filesize_approx")) or 0
+    size_label = f" · ~{format_bytes(size)}" if size > 0 else ""
+    return DownloadChoice(
+        kind="video",
+        label=f"{_height_label(best['height'])}p · mp4 · H.264{size_label}",
+        args=["-f", COMPATIBLE_FORMAT, "--merge-output-format", "mp4", "--remux-video", "mp4"],
+        suffix=".h264",
+    )
 
 
 @dataclass
@@ -473,11 +508,13 @@ def _to_number(value: Optional[str]) -> Optional[float]:
 CONCURRENT_FRAGMENTS = 4
 
 # post-processing steps — the UI shows "processing…" while these run
-PROCESSING_TAGS = ("[Merger]", "[ExtractAudio]", "[ThumbnailsConvertor]", "[EmbedThumbnail]", "[Metadata]")
+PROCESSING_TAGS = ("[Merger]", "[ExtractAudio]", "[VideoRemuxer]", "[ThumbnailsConvertor]", "[EmbedThumbnail]",
+                   "[Metadata]")
 # files those steps create, so a cancel can remove them
 PROCESSING_TARGETS = (
     re.compile(r'^\[Merger\] Merging formats into "(.+)"$'),
     re.compile(r"^\[ExtractAudio\] Destination: (.+)$"),
+    re.compile(r"^\[VideoRemuxer\] Remuxing video from \S+ to \S+; Destination: (.+)$"),
     re.compile(r'^\[ThumbnailsConvertor\] Converting thumbnail "(.+)" to \w+$'),
 )
 
@@ -516,7 +553,7 @@ def download(
         "--encoding",
         "utf-8",
         "-o",
-        os.path.join(out_dir, "%(title).60s.%(ext)s"),
+        os.path.join(out_dir, f"%(title).60s{choice.suffix}.%(ext)s"),
     ]
     if ffmpeg_location:
         args += ["--ffmpeg-location", ffmpeg_location]

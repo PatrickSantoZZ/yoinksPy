@@ -110,6 +110,22 @@ class ChoicesTest(unittest.TestCase):
         self.assertIn("--embed-thumbnail", audio.args)
         self.assertIn("--embed-metadata", audio.args)
 
+    def test_compatible_h264_choice(self):
+        info = {"formats": [
+            {"acodec": "mp4a.40.2", "vcodec": "none", "abr": 128, "filesize": 1_000_000},
+            {"acodec": "opus", "vcodec": "none", "abr": 160},
+            {"vcodec": "av01.0.08M.08", "acodec": "none", "height": 1080, "ext": "mp4", "filesize": 30_000_000},
+            {"vcodec": "avc1.640028", "acodec": "none", "height": 1080, "ext": "mp4", "filesize": 40_000_000},
+        ]}
+        compatible = [c for c in build_choices(info) if c.suffix == ".h264"]
+        self.assertEqual(len(compatible), 1)
+        self.assertTrue(compatible[0].label.startswith("1080p · mp4 · H.264"))
+        self.assertIn("--remux-video", compatible[0].args)
+
+    def test_no_compatible_choice_without_h264(self):
+        info = {"formats": [{"vcodec": "vp9", "acodec": "none", "height": 720}, {"acodec": "opus", "vcodec": "none"}]}
+        self.assertFalse([c for c in build_choices(info) if c.suffix])
+
     def test_no_formats(self):
         self.assertEqual([c.label for c in build_choices({})], ["best available · mp4", "audio only · mp3"])
 
