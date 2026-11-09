@@ -2,6 +2,7 @@
 Persistent settings in ~/.config/yoinks/config.json:
 
     {
+      "output_dir": null,            // default download folder (null = ~/Downloads)
       "ytdlp_args": []               // extra yt-dlp arguments, e.g. ["--embed-chapters"]
     }
 """
@@ -14,6 +15,7 @@ from typing import Any, Dict, List
 CONFIG_FILE = Path.home() / ".config" / "yoinks" / "config.json"
 
 DEFAULTS: Dict[str, Any] = {
+    "output_dir": None,
     "ytdlp_args": [],
 }
 
@@ -22,6 +24,8 @@ def _clean(raw: Any) -> Dict[str, Any]:
     config = dict(DEFAULTS)
     if not isinstance(raw, dict):
         return config
+    if isinstance(raw.get("output_dir"), str) and raw["output_dir"].strip():
+        config["output_dir"] = raw["output_dir"]
     args = raw.get("ytdlp_args")
     if isinstance(args, list) and all(isinstance(a, str) for a in args):
         config["ytdlp_args"] = list(args)

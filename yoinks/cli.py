@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 from . import __version__
 from .args import parse_args
 from .clipboard import read_clipboard
+from .config import load_config
 from .platforms import is_probably_url
 
 HELP = """
@@ -18,15 +21,25 @@ HELP = """
     $ yoinks https://youtu.be/dQw4w9WgXcQ
     $ yoinks https://x.com/user/status/123456
     $ yoinks                 (prompts for a url)
+    $ yoinks -o ~/Videos https://youtu.be/dQw4w9WgXcQ
 
   Options
-    --theme <mode>  use auto, light, or dark for this run
-    -h, --help      show this help
-    -v, --version   show version
+    -o, --output <dir>  save downloads to <dir> (default: ~/Downloads)
+    --theme <mode>      use auto, light, or dark for this run
+    -h, --help          show this help
+    -v, --version       show version
 
-  Downloads are saved to ~/Downloads.
+  Downloads are saved to ~/Downloads unless you pass -o.
+  Settings live in ~/.config/yoinks/config.json.
   Powered by yt-dlp — YouTube, X, Instagram, Threads, TikTok & 1800+ sites.
 """
+
+
+def resolve_output_dir(value: Optional[str]) -> str:
+    """Absolute download folder: the given one (~ expanded) or ~/Downloads."""
+    if not value:
+        return str(Path.home() / "Downloads")
+    return os.path.abspath(os.path.expanduser(value))
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -57,6 +70,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("yt-dlp not installed — fetched on first yoink")
         return 0
 
+    config = load_config()
+
+    out_dir = resolve_output_dir(args.output_dir or config.get("output_dir"))
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        if not os.access(out_dir, os.W_OK):
+            raise PermissionError("not writable")
+    except OSError as error:
+        print(f"yoinks: can’t save to “{out_dir}” — {error.strerror or error}", file=sys.stderr)
+        return 1
+
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("yoinks: needs an interactive terminal", file=sys.stderr)
         return 1
@@ -71,7 +95,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     from .app import App
 
-    app = App(initial_url=args.initial_url, clipboard_url=clipboard_url, theme_mode=args.theme_mode or "auto")
+    app = App(initial_url=args.initial_url, clipboard_url=clipboard_url, theme_mode=args.theme_mode or "auto",
+              out_dir=out_dir, config=config)
     try:
         app.run()
     except KeyboardInterrupt:

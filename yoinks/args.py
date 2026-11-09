@@ -12,6 +12,7 @@ class CliArgs:
     version: bool = False
     initial_url: Optional[str] = None
     theme_mode: Optional[str] = None
+    output_dir: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -23,15 +24,20 @@ def parse_args(args: List[str]) -> CliArgs:
     result = CliArgs()
     positional: List[str] = []
     index = 0
+
+    def take_value(flag: str) -> Optional[str]:
+        nonlocal index
+        index += 1
+        return args[index] if index < len(args) else None
+
     while index < len(args):
         arg = args[index]
         if arg in ("-h", "--help"):
             result.help = True
         elif arg in ("-v", "--version"):
             result.version = True
-        elif arg == "--theme":
-            index += 1
-            value = args[index] if index < len(args) else ""
+        elif arg == "--theme" or arg.startswith("--theme="):
+            value = take_value(arg) if arg == "--theme" else arg[len("--theme="):]
             if not value:
                 result.error = "--theme needs a value: auto, light, or dark"
                 return result
@@ -39,12 +45,12 @@ def parse_args(args: List[str]) -> CliArgs:
                 result.error = _bad_theme(value)
                 return result
             result.theme_mode = value
-        elif arg.startswith("--theme="):
-            value = arg[len("--theme="):]
-            if not is_theme_mode(value):
-                result.error = _bad_theme(value)
+        elif arg in ("-o", "--output") or arg.startswith("--output="):
+            value = take_value(arg) if not arg.startswith("--output=") else arg[len("--output="):]
+            if not value or value.startswith("-"):
+                result.error = f"{arg.split('=')[0]} needs a folder, e.g. -o ~/Videos"
                 return result
-            result.theme_mode = value
+            result.output_dir = value
         elif arg.startswith("-"):
             result.error = f"unknown option “{arg}”"
             return result
