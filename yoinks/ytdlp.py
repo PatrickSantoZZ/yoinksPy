@@ -291,12 +291,25 @@ def _extract_ffmpeg(archive: Path, names: List[str]) -> None:
         raise RuntimeError("ffmpeg archive is missing binaries")
 
 
+_ffmpeg_cache: Optional[tuple] = None
+_ffmpeg_lock = threading.Lock()
+
+
 def find_ffmpeg(on_status: Callable[[str], None], abort: Optional[Abort] = None) -> Optional[str]:
     """
     ffmpeg for merging / mp3 extraction: system install first, then ~/.yoinks/bin,
     then a one-time download. Returns the --ffmpeg-location to pass, or None when
     yt-dlp should find it itself (or it isn't available — single-file formats still work).
+    Looked up once per run; a cancelled fetch isn't remembered.
     """
+    global _ffmpeg_cache
+    with _ffmpeg_lock:
+        if _ffmpeg_cache is None:
+            _ffmpeg_cache = (_locate_ffmpeg(on_status, abort),)
+        return _ffmpeg_cache[0]
+
+
+def _locate_ffmpeg(on_status: Callable[[str], None], abort: Optional[Abort]) -> Optional[str]:
     if _command_works("ffmpeg", ["-version"]):
         return None  # on PATH, yt-dlp finds it itself
     exe = ".exe" if IS_WINDOWS else ""
