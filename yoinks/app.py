@@ -441,6 +441,8 @@ class Phase:
 
 class App:
     def __init__(self, *, initial_url: Optional[str], clipboard_url: Optional[str], theme_mode: str) -> None:
+        # extra yt-dlp args the probe succeeded with (cookies, mweb, user args) — downloads reuse them
+        self.ytdlp_args: List[str] = []
         self.events: "queue.Queue" = queue.Queue()
         self.term = Terminal(self.events)
         self.screen = Screen(self.term.write)
@@ -589,10 +591,14 @@ class App:
                 if abort.is_set():
                     return
                 self.post(abort, lambda: set_status("fetching video info…"))
-                result = yt.probe(ytdlp, target_url, abort)
+                result, used_args = yt.probe_with_fallbacks(
+                    ytdlp, target_url, abort,
+                    is_youtube=detect_platform(target_url).key == "youtube",
+                )
                 self.info_jsons.append(result.info_json_path)
 
                 def picked() -> None:
+                    self.ytdlp_args = used_args
                     self.info_json = result.info_json_path
                     self.info = result.info
                     self.choices = yt.build_choices(result.info)
@@ -626,6 +632,8 @@ class App:
         self.abort = abort
         self.set_phase(Phase("downloading", choice=choice))
         url, ytdlp, info_json = self.url, self.ytdlp, self.info_json
+        extra_args = list(self.ytdlp_args)
+        is_youtube = detect_platform(url).key == "youtube"
 
         def update(**fields) -> Callable[[], None]:
             def apply() -> None:
@@ -646,6 +654,8 @@ class App:
                     ytdlp=ytdlp, url=url, choice=choice, out_dir=OUT_DIR, ffmpeg_location=ffmpeg, abort=abort,
                     # reuse the probe's metadata — starts immediately instead of re-extracting
                     info_json_path=info_json,
+                    extra_args=extra_args,
+                    is_youtube=is_youtube,
                     # media urls in the cached info expired — a fresh extraction is on its way
                     on_refresh=lambda: self.post(abort, update(progress=None, refreshing=True)),
                     **handlers,

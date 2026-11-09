@@ -1,5 +1,7 @@
 import unittest
+from unittest import mock
 
+from yoinks import ytdlp as yt
 from yoinks.args import parse_args
 from yoinks.fmt import format_bytes, format_duration, shorten_path, truncate, wrap_text
 from yoinks.platforms import detect_platform, is_probably_url
@@ -128,6 +130,44 @@ class ChoicesTest(unittest.TestCase):
 
     def test_no_formats(self):
         self.assertEqual([c.label for c in build_choices({})], ["best available · mp4", "audio only · mp3"])
+
+
+class FallbackTest(unittest.TestCase):
+    def run_downloads(self, errors, is_youtube=True):
+        calls = []
+
+        def fake_download(**kwargs):
+            calls.append(kwargs)
+            error = errors[len(calls) - 1] if len(calls) <= len(errors) else None
+            if error:
+                raise RuntimeError(error)
+            return "/out/file.mp4"
+
+        refreshed = []
+        with mock.patch.object(yt, "download", fake_download):
+            try:
+                result = yt.download_with_fallbacks(extra_args=[], is_youtube=is_youtube,
+                                                    on_refresh=lambda: refreshed.append(1), info_json_path="i.json")
+            except RuntimeError as error:
+                result = f"error: {error}"
+        return result, calls, refreshed
+
+    def test_expired_link_refreshes_then_mweb(self):
+        result, calls, refreshed = self.run_downloads(["HTTP Error 403: Forbidden", "HTTP Error 403: Forbidden"])
+        self.assertEqual(result, "/out/file.mp4")
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0]["info_json_path"], "i.json")
+        self.assertNotIn("info_json_path", calls[1])
+        self.assertIn("youtube:player-client=mweb", calls[2]["extra_args"])
+        self.assertEqual(refreshed, [1])
+
+    def test_other_errors_are_not_retried(self):
+        result, calls, _ = self.run_downloads(["Requested format is not available"])
+        self.assertEqual((result, len(calls)), ("error: Requested format is not available", 1))
+
+    def test_no_mweb_outside_youtube(self):
+        _, calls, _ = self.run_downloads(["HTTP Error 403", "HTTP Error 403"], is_youtube=False)
+        self.assertEqual(len(calls), 2)
 
 
 class InputTest(unittest.TestCase):

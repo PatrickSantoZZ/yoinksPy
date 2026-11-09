@@ -367,13 +367,36 @@ def _clean_error(stderr: str) -> str:
     return re.sub(r"^ERROR:\s*(\[[^\]]+\]\s*)?", "", errors[-1])
 
 
+FORBIDDEN = re.compile(r"HTTP Error 403", re.I)
 # the media links in a saved probe are short-lived; these mean "fetch fresh ones"
 EXPIRED = re.compile(r"HTTP Error (403|404|410)", re.I)
+# YouTube's default clients increasingly hand out links that 403 without a PO
+# token; the mweb client sidesteps that for most public videos
+MWEB_ARGS = ["--extractor-args", "youtube:player-client=mweb"]
 
 
-def probe(ytdlp: str, url: str, abort: Optional[Abort] = None) -> ProbeResult:
+def probe_with_fallbacks(ytdlp: str, url: str, abort: Optional[Abort], *,
+                         extra_args: Optional[List[str]] = None, is_youtube: bool = False) -> tuple:
+    """
+    Probe, retrying YouTube 403s with the mweb client.
+    Returns (ProbeResult, the extra yt-dlp args that worked — reuse them to download).
+    """
+    args = list(extra_args or [])
+    try:
+        return probe(ytdlp, url, abort, args), args
+    except RuntimeError as error:
+        if abort and abort.is_set():
+            raise
+        last = error
+    if is_youtube and FORBIDDEN.search(str(last)):
+        args = [*args, *MWEB_ARGS]
+        return probe(ytdlp, url, abort, args), args
+    raise last
+
+
+def probe(ytdlp: str, url: str, abort: Optional[Abort] = None, extra_args: Optional[List[str]] = None) -> ProbeResult:
     proc = subprocess.Popen(
-        [ytdlp, "-J", "--no-playlist", "--no-warnings", "--encoding", "utf-8", url],
+        [ytdlp, "-J", "--no-playlist", "--no-warnings", "--encoding", "utf-8", *(extra_args or []), url],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -584,19 +607,26 @@ PROCESSING_TARGETS = (
 )
 
 
-def download_with_fallbacks(*, on_refresh: Callable[[], None], abort: Optional[Abort] = None,
-                            info_json_path: Optional[str] = None, **kwargs) -> str:
+def download_with_fallbacks(*, extra_args: List[str], is_youtube: bool, on_refresh: Callable[[], None],
+                            abort: Optional[Abort] = None, info_json_path: Optional[str] = None, **kwargs) -> str:
     """
     Download from the probe's saved metadata (starts instantly). If the media
-    link expired, fetch a fresh one — any other failure is reported as is.
+    link expired, fetch a fresh one; if YouTube still answers 403, retry once
+    with the mweb client.
     """
     try:
-        return download(info_json_path=info_json_path, abort=abort, **kwargs)
+        return download(info_json_path=info_json_path, extra_args=extra_args, abort=abort, **kwargs)
     except RuntimeError as error:
         if (abort and abort.is_set()) or not EXPIRED.search(str(error)):
             raise
     on_refresh()
-    return download(abort=abort, **kwargs)
+    try:
+        return download(extra_args=extra_args, abort=abort, **kwargs)
+    except RuntimeError as error:
+        if (abort and abort.is_set()) or not is_youtube or not FORBIDDEN.search(str(error)) \
+                or MWEB_ARGS[1] in extra_args:
+            raise
+    return download(extra_args=[*extra_args, *MWEB_ARGS], abort=abort, **kwargs)
 
 
 def download(
@@ -609,11 +639,14 @@ def download(
     on_processing: Callable[[], None],
     ffmpeg_location: Optional[str] = None,
     info_json_path: Optional[str] = None,
+    extra_args: Optional[List[str]] = None,
     abort: Optional[Abort] = None,
 ) -> str:
     args = [
         *(["--load-info-json", info_json_path] if info_json_path else [url]),
         *choice.args,
+        # cookies, mweb fallback and the user's own args from config.json
+        *(extra_args or []),
         # YouTube and HLS sites serve fragmented media; four fragments at once
         # gets around per-connection throttling (no-op for single-file sites)
         "--concurrent-fragments",
