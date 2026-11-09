@@ -468,6 +468,9 @@ def _to_number(value: Optional[str]) -> Optional[float]:
     return float(match.group(0)) if match else None
 
 
+CONCURRENT_FRAGMENTS = 4
+
+
 def download(
     *,
     ytdlp: str,
@@ -483,6 +486,10 @@ def download(
     args = [
         *(["--load-info-json", info_json_path] if info_json_path else [url]),
         *choice.args,
+        # YouTube and HLS sites serve fragmented media; four fragments at once
+        # gets around per-connection throttling (no-op for single-file sites)
+        "--concurrent-fragments",
+        str(CONCURRENT_FRAGMENTS),
         "--no-playlist",
         "--no-warnings",
         "--newline",
